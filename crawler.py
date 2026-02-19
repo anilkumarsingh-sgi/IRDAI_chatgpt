@@ -21,12 +21,16 @@ logging.basicConfig(
 logger = logging.getLogger("irdai.crawler")
 
 # ─── Config ────────────────────────────────────────────────────────────────────
-import platform
-_DATA_ROOT = Path("/tmp/irdai_data") if platform.system() == "Linux" else Path("data")
+_ON_CLOUD = Path("/mount/src").exists()
+_DATA_ROOT = Path("/tmp/irdai_data") if _ON_CLOUD else Path("data")
 
 BASE_URL = "https://irdai.gov.in"
 PDF_DIR = _DATA_ROOT / "pdfs"
 DB_PATH = _DATA_ROOT / "irdai_tracker.db"
+
+# Ensure writable dirs exist at import time
+_DATA_ROOT.mkdir(parents=True, exist_ok=True)
+PDF_DIR.mkdir(parents=True, exist_ok=True)
 
 DOCUMENT_CATEGORIES = {
     "regulations":   "/web/guest/regulations",
@@ -180,13 +184,22 @@ def get_next_page_url(html: str, current_url: str) -> str | None:
 def _extract_pdf_filename(url: str) -> str:
     """Extract a clean .pdf filename from IRDAI URL patterns.
     Handles: /documents/37343/365525/filename.pdf/UUID?t=...
+    Sanitizes non-ASCII characters for cross-platform compatibility.
     """
+    import re
     from urllib.parse import unquote
     parsed = urlparse(url)
     path_parts = parsed.path.split("/")
     for part in path_parts:
         if part.lower().endswith(".pdf"):
-            return unquote(part).replace('+', ' ').strip()
+            name = unquote(part).replace('+', ' ').strip()
+            # Replace non-ASCII chars with underscore for safe filenames
+            name = re.sub(r'[^\x20-\x7E]', '_', name)
+            # Collapse multiple underscores
+            name = re.sub(r'_+', '_', name).strip('_')
+            if not name or name == '.pdf':
+                break  # fall through to hash-based name
+            return name
     return f"doc_{hashlib.md5(url.encode()).hexdigest()[:8]}.pdf"
 
 
