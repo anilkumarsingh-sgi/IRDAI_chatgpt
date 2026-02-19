@@ -21,9 +21,12 @@ logging.basicConfig(
 logger = logging.getLogger("irdai.crawler")
 
 # ─── Config ────────────────────────────────────────────────────────────────────
+import platform
+_DATA_ROOT = Path("/tmp/irdai_data") if platform.system() == "Linux" else Path("data")
+
 BASE_URL = "https://irdai.gov.in"
-PDF_DIR = Path("data/pdfs")
-DB_PATH = Path("data/irdai_tracker.db")
+PDF_DIR = _DATA_ROOT / "pdfs"
+DB_PATH = _DATA_ROOT / "irdai_tracker.db"
 
 DOCUMENT_CATEGORIES = {
     "regulations":   "/web/guest/regulations",

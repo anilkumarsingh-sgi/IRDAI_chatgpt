@@ -17,8 +17,11 @@ from sentence_transformers import SentenceTransformer
 logger = logging.getLogger("irdai.ingestion")
 
 # ─── Config ────────────────────────────────────────────────────────────────────
-PDF_DIR        = Path("data/pdfs")
-CHROMA_DIR     = Path("data/chroma_db")
+import platform
+_DATA_ROOT = Path("/tmp/irdai_data") if platform.system() == "Linux" else Path("data")
+
+PDF_DIR        = _DATA_ROOT / "pdfs"
+CHROMA_DIR     = _DATA_ROOT / "chroma_db"
 EMBED_MODEL    = "sentence-transformers/all-MiniLM-L6-v2"
 CHUNK_SIZE     = 800
 CHUNK_OVERLAP  = 100
