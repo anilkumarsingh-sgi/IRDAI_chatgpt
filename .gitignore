@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+env/
+
+# Streamlit secrets (contains HF_TOKEN - NEVER commit)
+.streamlit/secrets.toml
+
+# Downloaded data & vector DB (too large for GitHub, will be rebuilt on cloud)
+data/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
