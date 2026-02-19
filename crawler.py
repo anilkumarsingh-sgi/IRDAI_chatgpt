@@ -90,12 +90,18 @@ def record_download(url: str, filename: str, category: str, file_hash: str):
 
 def get_download_stats() -> dict:
     """Return download stats per category."""
+    if not DB_PATH.exists():
+        return {}
     conn = sqlite3.connect(DB_PATH)
-    rows = conn.execute(
-        "SELECT category, COUNT(*) FROM downloads GROUP BY category"
-    ).fetchall()
-    conn.close()
-    return {r[0]: r[1] for r in rows}
+    try:
+        rows = conn.execute(
+            "SELECT category, COUNT(*) FROM downloads GROUP BY category"
+        ).fetchall()
+        return {r[0]: r[1] for r in rows}
+    except sqlite3.OperationalError:
+        return {}
+    finally:
+        conn.close()
 
 
 # ─── HTTP Helpers ──────────────────────────────────────────────────────────────
