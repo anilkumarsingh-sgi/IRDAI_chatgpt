@@ -13,7 +13,7 @@ import streamlit as st
 from huggingface_hub import InferenceClient
 
 from ingestion import retrieve_relevant_chunks, get_chroma_collection, CHROMA_DIR
-from crawler import get_download_stats, DB_PATH, init_db
+from crawler import get_download_stats, DB_PATH, init_db, PDF_DIR, EXCEL_DIR, WORD_DIR
 
 # ─── Logging ───────────────────────────────────────────────────────────────────
 logging.basicConfig(level=logging.INFO)
@@ -296,6 +296,18 @@ def get_collection_stats() -> dict:
         return {"count": 0, "status": "error"}
 
 
+def get_file_counts() -> dict:
+    """Count actual files on disk by type."""
+    counts = {"pdf": 0, "excel": 0, "word": 0}
+    if PDF_DIR.exists():
+        counts["pdf"] = len(list(PDF_DIR.rglob("*.pdf")))
+    if EXCEL_DIR.exists():
+        counts["excel"] = len(list(EXCEL_DIR.rglob("*.xlsx"))) + len(list(EXCEL_DIR.rglob("*.xls")))
+    if WORD_DIR.exists():
+        counts["word"] = len(list(WORD_DIR.rglob("*.docx"))) + len(list(WORD_DIR.rglob("*.doc")))
+    return counts
+
+
 def get_sqlite_stats() -> dict:
     """Get download stats from SQLite."""
     try:
@@ -317,7 +329,8 @@ with st.sidebar:
     # System Status
     col_stats = get_collection_stats()
     db_stats  = get_sqlite_stats()
-    total_pdfs = sum(db_stats.values()) if db_stats else 0
+    file_counts = get_file_counts()
+    total_docs = sum(file_counts.values())
     vec_count  = col_stats["count"]
     vec_status_cls = "pill-ok" if col_stats["status"] == "ok" and vec_count > 0 else "pill-err"
 
@@ -325,15 +338,22 @@ with st.sidebar:
     <div class="sb-block">
       <div class="sb-title">System Status</div>
       <div>Vector DB &nbsp;<span class="{vec_status_cls}">{'✓ ' + str(vec_count) + ' chunks' if vec_count > 0 else '✗ Empty'}</span></div>
-      <div>PDFs indexed &nbsp;<b style="color:#E2E8F0">{total_pdfs}</b></div>
+      <div>Total Docs &nbsp;<b style="color:#E2E8F0">{total_docs}</b></div>
     </div>
     """, unsafe_allow_html=True)
 
-    # Category breakdown
+    # Document inventory by type
+    st.markdown('<div class="sb-block"><div class="sb-title">Document Inventory</div>', unsafe_allow_html=True)
+    st.markdown(f'<div>📄 PDFs: <b style="color:#E2E8F0">{file_counts["pdf"]}</b></div>', unsafe_allow_html=True)
+    st.markdown(f'<div>📊 Excel: <b style="color:#E2E8F0">{file_counts["excel"]}</b></div>', unsafe_allow_html=True)
+    st.markdown(f'<div>📝 Word: <b style="color:#E2E8F0">{file_counts["word"]}</b></div>', unsafe_allow_html=True)
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    # Category breakdown from DB
     if db_stats:
-        st.markdown('<div class="sb-block"><div class="sb-title">Document Inventory</div>', unsafe_allow_html=True)
+        st.markdown('<div class="sb-block"><div class="sb-title">Download Categories</div>', unsafe_allow_html=True)
         for cat, cnt in db_stats.items():
-            st.markdown(f"<div>📄 {cat.capitalize()}: <b style='color:#E2E8F0'>{cnt}</b></div>", unsafe_allow_html=True)
+            st.markdown(f"<div>📁 {cat}: <b style='color:#E2E8F0'>{cnt}</b></div>", unsafe_allow_html=True)
         st.markdown("</div>", unsafe_allow_html=True)
 
     st.divider()
@@ -344,13 +364,16 @@ with st.sidebar:
         from crawler import run_crawl
         with st.spinner("Crawling IRDAI website…"):
             summary = run_crawl()
-        st.success(f"Crawl done: {summary}")
+        st.success(f"Crawl done — PDFs: {summary.get('pdf',0)}, Excel: {summary.get('excel',0)}, Word: {summary.get('word',0)}")
 
     if st.button("📥 Run Ingestion"):
         from ingestion import run_ingestion
-        with st.spinner("Ingesting PDFs into vector store…"):
+        with st.spinner("Ingesting documents into vector store…"):
             summary = run_ingestion()
-        st.success(f"Ingested {summary['total_files']} files → {summary['total_chunks']} chunks")
+        st.success(
+            f"Ingested {summary['total_files']} files → {summary['total_chunks']} chunks\n"
+            f"(PDF: {summary.get('pdf',0)}, Excel: {summary.get('excel',0)}, Word: {summary.get('word',0)})"
+        )
 
     st.divider()
     st.markdown("""
@@ -375,18 +398,20 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ── Metrics row
-c1, c2, c3, c4 = st.columns(4)
+c1, c2, c3, c4, c5 = st.columns(5)
 col_stats_now = get_collection_stats()
-db_stats_now  = get_sqlite_stats()
-total_pdfs_now = sum(db_stats_now.values()) if db_stats_now else 0
+file_counts_now = get_file_counts()
+total_docs_now = sum(file_counts_now.values())
 
 with c1:
-    st.markdown(f'<div class="metric-card"><div class="val">{total_pdfs_now}</div><div class="lbl">PDFs Indexed</div></div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="metric-card"><div class="val">{file_counts_now["pdf"]}</div><div class="lbl">PDFs</div></div>', unsafe_allow_html=True)
 with c2:
-    st.markdown(f'<div class="metric-card"><div class="val">{col_stats_now["count"]}</div><div class="lbl">Vector Chunks</div></div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="metric-card"><div class="val">{file_counts_now["excel"]}</div><div class="lbl">Excel Files</div></div>', unsafe_allow_html=True)
 with c3:
-    st.markdown(f'<div class="metric-card"><div class="val">{len(db_stats_now)}</div><div class="lbl">Categories</div></div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="metric-card"><div class="val">{file_counts_now["word"]}</div><div class="lbl">Word Docs</div></div>', unsafe_allow_html=True)
 with c4:
+    st.markdown(f'<div class="metric-card"><div class="val">{col_stats_now["count"]}</div><div class="lbl">Vector Chunks</div></div>', unsafe_allow_html=True)
+with c5:
     status_txt = "🟢 Ready" if col_stats_now["count"] > 0 else "🔴 Not Ready"
     st.markdown(f'<div class="metric-card"><div class="val" style="font-size:1.2rem">{status_txt}</div><div class="lbl">System Status</div></div>', unsafe_allow_html=True)
 

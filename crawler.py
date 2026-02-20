@@ -1,6 +1,6 @@
 """
 IRDAI Compliance GPT - Crawler Layer
-Crawls IRDAI website, downloads PDFs with deduplication via SQLite
+Crawls IRDAI website, downloads PDFs, Excel and Word docs with deduplication via SQLite
 """
 
 import os
@@ -25,12 +25,24 @@ _ON_CLOUD = Path("/mount/src").exists()
 _DATA_ROOT = Path("/tmp/irdai_data") if _ON_CLOUD else Path("data")
 
 BASE_URL = "https://irdai.gov.in"
-PDF_DIR = _DATA_ROOT / "pdfs"
-DB_PATH = _DATA_ROOT / "irdai_tracker.db"
+PDF_DIR   = _DATA_ROOT / "pdfs"
+EXCEL_DIR = _DATA_ROOT / "excel"
+WORD_DIR  = _DATA_ROOT / "word"
+DB_PATH   = _DATA_ROOT / "irdai_tracker.db"
 
 # Ensure writable dirs exist at import time
-_DATA_ROOT.mkdir(parents=True, exist_ok=True)
-PDF_DIR.mkdir(parents=True, exist_ok=True)
+for _d in [_DATA_ROOT, PDF_DIR, EXCEL_DIR, WORD_DIR]:
+    _d.mkdir(parents=True, exist_ok=True)
+
+# Supported file extensions mapped to their target directory
+DOC_TYPES = {
+    ".pdf":  PDF_DIR,
+    ".xlsx": EXCEL_DIR,
+    ".xls":  EXCEL_DIR,
+    ".csv":  EXCEL_DIR,
+    ".docx": WORD_DIR,
+    ".doc":  WORD_DIR,
+}
 
 DOCUMENT_CATEGORIES = {
     "regulations":   "/web/guest/regulations",
@@ -38,6 +50,16 @@ DOCUMENT_CATEGORIES = {
     "notifications": "/web/guest/notifications",
     "guidelines":    "/web/guest/guidelines",
 }
+
+# Additional pages to scrape for documents
+EXTRA_PAGES = [
+    "/home",
+    "/web/guest/acts",
+    "/web/guest/annual-reports",
+    "/web/guest/forms",
+    "/web/guest/reports-and-manuals",
+    "/web/guest/orders",
+]
 
 HEADERS = {
     "User-Agent": (
@@ -135,9 +157,9 @@ def fetch_with_retry(url: str, stream: bool = False) -> requests.Response | None
 
 
 # ─── PDF Crawler ───────────────────────────────────────────────────────────────
-def extract_pdf_links(html: str, base_url: str) -> list[str]:
-    """Extract PDF links from an IRDAI page.
-    Handles both direct .pdf links and /documents/.../*.pdf/UUID patterns.
+def extract_doc_links(html: str, base_url: str) -> list[tuple[str, str]]:
+    """Extract all document links (PDF, Excel, Word) from a page.
+    Returns list of (full_url, extension) tuples.
     """
     soup = BeautifulSoup(html, "html.parser")
     links = []
@@ -145,14 +167,12 @@ def extract_pdf_links(html: str, base_url: str) -> list[str]:
         href = tag["href"].strip()
         if href.startswith("javascript"):
             continue
-        # Match /documents/ URLs that contain .pdf in the path
-        if "/documents/" in href and ".pdf" in href.lower():
-            full = urljoin(base_url, href)
-            links.append(full)
-        # Match plain .pdf links
-        elif href.lower().endswith(".pdf"):
-            full = urljoin(base_url, href)
-            links.append(full)
+        hl = href.lower()
+        for ext in DOC_TYPES:
+            if ext in hl:
+                full = urljoin(base_url, href)
+                links.append((full, ext))
+                break
     return list(set(links))
 
 
@@ -181,9 +201,8 @@ def get_next_page_url(html: str, current_url: str) -> str | None:
     return None
 
 
-def _extract_pdf_filename(url: str) -> str:
-    """Extract a clean .pdf filename from IRDAI URL patterns.
-    Handles: /documents/37343/365525/filename.pdf/UUID?t=...
+def _extract_doc_filename(url: str, ext: str) -> str:
+    """Extract a clean filename from IRDAI URL patterns.
     Sanitizes non-ASCII characters for cross-platform compatibility.
     """
     import re
@@ -191,20 +210,17 @@ def _extract_pdf_filename(url: str) -> str:
     parsed = urlparse(url)
     path_parts = parsed.path.split("/")
     for part in path_parts:
-        if part.lower().endswith(".pdf"):
+        if ext in part.lower():
             name = unquote(part).replace('+', ' ').strip()
-            # Replace non-ASCII chars with underscore for safe filenames
             name = re.sub(r'[^\x20-\x7E]', '_', name)
-            # Collapse multiple underscores
             name = re.sub(r'_+', '_', name).strip('_')
-            if not name or name == '.pdf':
-                break  # fall through to hash-based name
-            return name
-    return f"doc_{hashlib.md5(url.encode()).hexdigest()[:8]}.pdf"
+            if name and name != ext:
+                return name
+    return f"doc_{hashlib.md5(url.encode()).hexdigest()[:8]}{ext}"
 
 
-def download_pdf(url: str, category: str) -> bool:
-    """Download a single PDF; returns True if new file saved."""
+def download_document(url: str, ext: str, category: str) -> bool:
+    """Download a single document (PDF/Excel/Word); returns True if new file saved."""
     if is_already_downloaded(url):
         logger.debug("Already downloaded: %s", url)
         return False
@@ -213,35 +229,35 @@ def download_pdf(url: str, category: str) -> bool:
     if not resp:
         return False
 
-    # Check content type
-    content_type = resp.headers.get("Content-Type", "")
-    if "pdf" not in content_type.lower() and "octet-stream" not in content_type.lower():
-        logger.warning("Skipping non-PDF content (%s): %s", content_type, url[:100])
-        return False
-
-    # Determine filename
-    filename = _extract_pdf_filename(url)
-    if not filename.lower().endswith('.pdf'):
-        filename += '.pdf'
-    dest = PDF_DIR / category / filename
+    # Determine target directory and filename
+    target_dir = DOC_TYPES.get(ext, PDF_DIR)
+    filename = _extract_doc_filename(url, ext)
+    if not filename.lower().endswith(ext):
+        filename += ext
+    dest = target_dir / category / filename
     dest.parent.mkdir(parents=True, exist_ok=True)
 
     # Stream write + hash
     sha256 = hashlib.sha256()
-    with open(dest, "wb") as fh:
-        for chunk in resp.iter_content(chunk_size=8192):
-            fh.write(chunk)
-            sha256.update(chunk)
+    try:
+        with open(dest, "wb") as fh:
+            for chunk in resp.iter_content(chunk_size=8192):
+                fh.write(chunk)
+                sha256.update(chunk)
+    except OSError as exc:
+        logger.error("Failed to write %s: %s", dest, exc)
+        return False
 
-    record_download(url, filename, category, sha256.hexdigest())
-    logger.info("Downloaded [%s] %s", category, filename)
+    file_type = "pdf" if ext == ".pdf" else ("excel" if ext in (".xlsx", ".xls", ".csv") else "word")
+    record_download(url, filename, f"{category}_{file_type}", sha256.hexdigest())
+    logger.info("Downloaded [%s/%s] %s", category, file_type, filename)
     return True
 
 
-def crawl_category(category: str, path: str, max_pages: int = 5) -> int:
-    """Crawl a single IRDAI category with pagination. Returns count of new PDFs."""
+def crawl_category(category: str, path: str, max_pages: int = 5) -> dict:
+    """Crawl a single IRDAI category. Returns counts by doc type."""
     url = BASE_URL + path
-    count = 0
+    counts = {"pdf": 0, "excel": 0, "word": 0}
 
     for page_num in range(1, max_pages + 1):
         logger.info("Crawling %s – page %d: %s", category, page_num, url)
@@ -249,16 +265,17 @@ def crawl_category(category: str, path: str, max_pages: int = 5) -> int:
         if not resp:
             break
 
-        # 1. Direct PDF links on the page
-        pdf_links = extract_pdf_links(resp.text, url)
-        logger.info("Found %d direct PDF links on page %d", len(pdf_links), page_num)
+        # 1. Direct document links on the page
+        doc_links = extract_doc_links(resp.text, url)
+        logger.info("Found %d document links on page %d", len(doc_links), page_num)
 
-        for pdf_url in pdf_links:
-            if download_pdf(pdf_url, category):
-                count += 1
+        for doc_url, ext in doc_links:
+            if download_document(doc_url, ext, category):
+                dtype = "pdf" if ext == ".pdf" else ("excel" if ext in (".xlsx",".xls",".csv") else "word")
+                counts[dtype] += 1
             time.sleep(0.5)
 
-        # 2. Follow document-detail pages to find PDFs inside
+        # 2. Follow document-detail pages
         detail_links = extract_document_detail_links(resp.text, url)
         logger.info("Found %d document-detail links on page %d", len(detail_links), page_num)
 
@@ -266,10 +283,11 @@ def crawl_category(category: str, path: str, max_pages: int = 5) -> int:
             try:
                 detail_resp = fetch_with_retry(detail_url)
                 if detail_resp:
-                    inner_pdfs = extract_pdf_links(detail_resp.text, detail_url)
-                    for pdf_url in inner_pdfs:
-                        if download_pdf(pdf_url, category):
-                            count += 1
+                    inner_docs = extract_doc_links(detail_resp.text, detail_url)
+                    for doc_url, ext in inner_docs:
+                        if download_document(doc_url, ext, category):
+                            dtype = "pdf" if ext == ".pdf" else ("excel" if ext in (".xlsx",".xls",".csv") else "word")
+                            counts[dtype] += 1
                         time.sleep(0.5)
             except Exception as exc:
                 logger.warning("Error following detail page %s: %s", detail_url[:80], exc)
@@ -282,24 +300,71 @@ def crawl_category(category: str, path: str, max_pages: int = 5) -> int:
         url = next_url
         time.sleep(1)
 
-    return count
+    return counts
+
+
+def crawl_extra_pages() -> dict:
+    """Crawl additional IRDAI pages (home, forms, reports, etc.)."""
+    counts = {"pdf": 0, "excel": 0, "word": 0}
+    for path in EXTRA_PAGES:
+        url = BASE_URL + path
+        category = path.split("/")[-1] or "home"
+        logger.info("Crawling extra page: %s", url)
+        resp = fetch_with_retry(url)
+        if not resp:
+            continue
+
+        doc_links = extract_doc_links(resp.text, url)
+        logger.info("Found %d document links on %s", len(doc_links), category)
+
+        for doc_url, ext in doc_links:
+            if download_document(doc_url, ext, category):
+                dtype = "pdf" if ext == ".pdf" else ("excel" if ext in (".xlsx",".xls",".csv") else "word")
+                counts[dtype] += 1
+            time.sleep(0.5)
+
+        # Follow detail pages
+        detail_links = extract_document_detail_links(resp.text, url)
+        for detail_url in detail_links:
+            try:
+                detail_resp = fetch_with_retry(detail_url)
+                if detail_resp:
+                    inner_docs = extract_doc_links(detail_resp.text, detail_url)
+                    for doc_url, ext in inner_docs:
+                        if download_document(doc_url, ext, category):
+                            dtype = "pdf" if ext == ".pdf" else ("excel" if ext in (".xlsx",".xls",".csv") else "word")
+                            counts[dtype] += 1
+                        time.sleep(0.5)
+            except Exception as exc:
+                logger.warning("Error: %s", exc)
+            time.sleep(0.5)
+    return counts
 
 
 def run_crawl(categories: list[str] | None = None) -> dict:
-    """Run crawler for all (or selected) categories. Returns summary dict."""
+    """Run crawler for all (or selected) categories + extra pages. Returns summary."""
     init_db()
-    PDF_DIR.mkdir(parents=True, exist_ok=True)
+    for _d in [PDF_DIR, EXCEL_DIR, WORD_DIR]:
+        _d.mkdir(parents=True, exist_ok=True)
 
     cats = categories or list(DOCUMENT_CATEGORIES.keys())
-    summary = {}
+    summary = {"pdf": 0, "excel": 0, "word": 0}
+
     for cat in cats:
         path = DOCUMENT_CATEGORIES.get(cat)
         if not path:
             logger.warning("Unknown category: %s", cat)
             continue
-        new_count = crawl_category(cat, path)
-        summary[cat] = new_count
-        logger.info("Category '%s' – %d new PDFs downloaded", cat, new_count)
+        counts = crawl_category(cat, path)
+        for k in summary:
+            summary[k] += counts.get(k, 0)
+        logger.info("Category '%s' – %s", cat, counts)
+
+    # Crawl extra pages
+    extra_counts = crawl_extra_pages()
+    for k in summary:
+        summary[k] += extra_counts.get(k, 0)
+    logger.info("Extra pages – %s", extra_counts)
 
     logger.info("Crawl complete. Summary: %s", summary)
     return summary
