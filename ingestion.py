@@ -210,8 +210,14 @@ def run_ingestion(category: str | None = None) -> dict:
     collection = get_chroma_collection()
     model      = get_embed_model()
 
-    # Already-ingested document IDs
-    existing = set(collection.get()["ids"]) if collection.count() > 0 else set()
+    # Already-ingested document IDs (paginated to avoid SQLite variable limit)
+    existing: set[str] = set()
+    total = collection.count()
+    if total > 0:
+        batch_size = 5000
+        for offset in range(0, total, batch_size):
+            batch = collection.get(limit=batch_size, offset=offset)["ids"]
+            existing.update(batch)
 
     # Collect files from all document directories
     doc_files: list[tuple[Path, str]] = []  # (path, type_label)

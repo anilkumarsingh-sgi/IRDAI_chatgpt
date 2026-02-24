@@ -3,19 +3,24 @@
 ## Architecture Overview
 
 ```
-┌───────────────────────────────────────────────────────┐
-│                    Streamlit Cloud                     │
-│                                                        │
-│  ┌──────────┐  ┌──────────┐  ┌──────────────────────┐ │
-│  │ Crawler  │  │Ingestion │  │   Streamlit UI (app) │ │
-│  │(crawler) │  │(ingest)  │  │   + RAG Pipeline     │ │
-│  └────┬─────┘  └────┬─────┘  └──────────┬───────────┘ │
-│       │              │                   │              │
-│  ┌────▼─────┐   ┌────▼──────┐  ┌────────▼───────────┐ │
-│  │  SQLite  │   │  ChromaDB │  │  HuggingFace API   │ │
-│  │(tracker) │   │  (vectors)│  │  Mistral-7B-Instruct│ │
-│  └──────────┘   └───────────┘  └────────────────────┘ │
-└───────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────┐
+│                    Streamlit Cloud                          │
+│                                                             │
+│  ┌──────────┐  ┌──────────┐  ┌───────────────────────────┐ │
+│  │ Crawler  │  │Ingestion │  │   Streamlit UI (app.py)   │ │
+│  │(crawler) │→ │(ingest)  │→ │   + RAG Pipeline          │ │
+│  └────┬─────┘  └────┬─────┘  └──────────┬────────────────┘ │
+│       │              │                   │                   │
+│  ┌────▼─────┐   ┌────▼──────┐  ┌────────▼────────────────┐ │
+│  │  SQLite  │   │  ChromaDB │  │  HuggingFace API        │ │
+│  │(tracker) │   │  (vectors)│  │  Mistral-7B-Instruct    │ │
+│  └──────────┘   └───────────┘  └─────────────────────────┘ │
+│       ▲                                                      │
+│  ┌────┴─────────────────────────────────────────────────┐   │
+│  │  scheduler.py – Background thread (every 12 hours)   │   │
+│  │  Auto-crawls IRDAI → downloads new docs → ingests    │   │
+│  └──────────────────────────────────────────────────────┘   │
+└────────────────────────────────────────────────────────────┘
 ```
 
 ## Folder Structure
@@ -24,15 +29,20 @@
 irdai_compliance_gpt/
 ├── app.py                  ← Streamlit UI + RAG pipeline
 ├── crawler.py              ← IRDAI website crawler
-├── ingestion.py            ← PDF → embed → ChromaDB
+├── ingestion.py            ← PDF/Excel/Word → embed → ChromaDB
+├── scheduler.py            ← Background auto-update scheduler
 ├── requirements.txt
-├── .env.example
+├── packages.txt            ← System packages for Streamlit Cloud
+├── .gitignore
 ├── .streamlit/
-│   └── secrets.toml        ← HF_TOKEN (don't commit!)
+│   ├── config.toml         ← Streamlit theme/server config
+│   └── secrets.toml        ← HF_TOKEN (NEVER commit!)
 └── data/                   ← Auto-created at runtime
-    ├── pdfs/               ← Downloaded PDFs
+    ├── pdfs/               ← Downloaded PDFs by category
+    ├── excel/              ← Downloaded Excel files
+    ├── word/               ← Downloaded Word docs
     ├── chroma_db/          ← Vector store
-    └── irdai_tracker.db    ← SQLite dedup tracker
+    └── scheduler_state.json← Auto-update state tracker
 ```
 
 ---
@@ -56,11 +66,9 @@ streamlit run app.py
 ### Step 3: Push to GitHub
 ```bash
 git init
-git add app.py crawler.py ingestion.py requirements.txt .streamlit/ .env.example
-# DO NOT add data/ or .env (add them to .gitignore)
-echo "data/" >> .gitignore
-echo ".env" >> .gitignore
-git commit -m "Initial IRDAI Compliance GPT"
+git add app.py crawler.py ingestion.py scheduler.py requirements.txt packages.txt .streamlit/config.toml .gitignore README.md
+# DO NOT add data/ or secrets.toml
+git commit -m "IRDAI Compliance GPT with auto-update"
 git remote add origin https://github.com/YOUR_USERNAME/irdai-compliance-gpt.git
 git push -u origin main
 ```
@@ -78,24 +86,52 @@ git push -u origin main
    ```toml
    HF_TOKEN = "hf_your_actual_token_here"
    ```
-7. Click **Deploy**
+7. (Optional) Set environment variable for update interval:
+   ```toml
+   # In secrets or as env var — interval in seconds (default: 43200 = 12 hours)
+   IRDAI_UPDATE_INTERVAL = "43200"
+   ```
+8. Click **Deploy**
 
 > ⏳ First deployment takes ~5 minutes (installs packages)
 
 ---
 
-## ⚡ C) Running the Pipeline on Streamlit Cloud
+## 🔄 C) Automatic Document Updates
 
-The app includes **Admin Actions** in the sidebar:
+The app includes a **background scheduler** that automatically:
 
-1. **🕷️ Run Crawler** — Crawls IRDAI website, downloads PDFs into `data/pdfs/`
-2. **📥 Run Ingestion** — Processes PDFs, generates embeddings, stores in ChromaDB
+1. **Crawls IRDAI website** every 12 hours (configurable via `IRDAI_UPDATE_INTERVAL`)
+2. **Downloads new PDFs, Excel & Word** documents with deduplication
+3. **Ingests new documents** into ChromaDB vector store
+4. **Tracks update state** — shows last update time in the sidebar
 
-> **Note:** On Streamlit Cloud, `data/` is ephemeral (resets on redeploy). For persistence, use a mounted volume or S3 + pre-built ChromaDB.
+### How it works on Streamlit Cloud:
+- A daemon thread starts when the app boots
+- It checks every 5 minutes if an update is due
+- When due, it runs the full crawl → ingest pipeline in the background
+- The UI shows real-time status: Running / Last updated X hours ago / Pending
+- **Manual override**: Click "🔄 Force Update Now" in the sidebar
+
+### Important: Ephemeral Storage
+- On Streamlit Cloud, `/tmp/irdai_data/` is used (ephemeral — resets on reboot)
+- **On first start**, the scheduler will automatically crawl and build the vector database
+- Subsequent restarts will re-crawl (data is fresh but takes a few minutes to rebuild)
+- For persistent storage, consider upgrading to a cloud database (see Enterprise section)
 
 ---
 
-## 📉 D) Handling HuggingFace API Limits
+## ⚡ D) Running the Pipeline Manually
+
+The sidebar includes **Admin Actions**:
+
+1. **🔄 Force Update Now** — Triggers immediate crawl + ingestion in background
+2. **🕷️ Run Crawler** — Crawls IRDAI website only (downloads new documents)
+3. **📥 Run Ingestion** — Processes downloaded docs into ChromaDB only
+
+---
+
+## 📉 E) Handling HuggingFace API Limits
 
 | Plan | Rate Limit | Notes |
 |------|-----------|-------|
@@ -110,17 +146,18 @@ The app automatically:
 
 ---
 
-## 💰 E) Cost Optimization Tips
+## 💰 F) Cost Optimization Tips
 
 1. **Use smaller models first**: `google/flan-t5-large` is free and fast for simple queries
 2. **Cache aggressively**: Use `@st.cache_resource` for models, `@st.cache_data` for static data
 3. **Limit n_results**: Keep retrieval to 3-5 chunks (reduces context size → cheaper API calls)
-4. **Batch ingestion**: Run crawler + ingestion once a week, not on every visit
+4. **Auto-scraping eliminates manual work**: The scheduler handles updates automatically
 5. **Use quantized models**: `TheBloke/Mistral-7B-Instruct-v0.2-GPTQ` is faster on shared infra
+6. **Tune update interval**: Set `IRDAI_UPDATE_INTERVAL` to `86400` (24h) if 12h is too frequent
 
 ---
 
-## 🏢 F) Enterprise Upgrade Plan
+## 🏢 G) Enterprise Upgrade Plan
 
 | Feature | Free/Cloud | Enterprise |
 |---------|-----------|------------|

@@ -51,14 +51,178 @@ DOCUMENT_CATEGORIES = {
     "guidelines":    "/web/guest/guidelines",
 }
 
-# Additional pages to scrape for documents
+# All sections of the IRDAI website to scrape for documents
 EXTRA_PAGES = [
+    # ── Main pages ──
     "/home",
+    # ── Legal & Regulatory ──
+    "/acts",
+    "/rules",
+    "/rules2",
+    "/regulations",
+    "/regulations2",
+    "/updated-regulations",
+    "/consolidated-gazette-notified-regulations",
+    "/exposure-drafts",
+    "/comments-on-exposure-drafts",
+    # ── Orders & Enforcement ──
+    "/orders1",
+    "/cic-orders",
+    "/enforcement",
+    "/warnings-and-penalties",
+    "/public-notices1",
+    "/public-notices3",
+    "/notices1",
+    # ── Reports & Stats ──
+    "/annual-reports",
+    "/annual-accounts",
+    "/committee-reports",
+    "/life-reports",
+    "/non-life-reports",
+    "/monthly-business-figures1",
+    "/segment-wise-data",
+    "/motor-third-party-data",
+    "/graphical-representation-monthly-business-figures1",
+    "/industry-trends",
+    "/report-and-statistics1",
+    "/public-disclosures",
+    "/minutes-of-authority-meeting-public-disclosures",
+    "/handbook-of-indian-insurance",
+    "/handbook-of-ir1",
+    "/handbooks",
+    # ── Publications ──
+    "/ebooks",
+    "/irdai-journal",
+    "/speeches",
+    "/press-releases",
+    "/other-communication",
+    "/communications",
+    # ── Consumer & Policyholders ──
+    "/consumer-affairs-booklet",
+    "/consumer-affairs-booklet1",
+    "/grievance-redressal",
+    "/grievance-redressal-mechanism1",
+    "/consumer-affairs1",
+    "/faqs1",
+    "/standard-products",
+    "/standard-products-general-insurance",
+    "/standard-products-health-insurance",
+    "/standard-products-life",
+    "/health-insurance-products",
+    "/life-insurance-products",
+    "/non-life-insurance-products",
+    "/products-offered",
+    # ── Forms & Processes ──
+    "/forms",
+    "/account-statement-rules",
+    "/tenders",
+    "/career-at-irdai",
+    "/results",
+    "/internship",
+    # ── Departments ──
+    "/actuarial",
+    "/agency-distribution",
+    "/brokers",
+    "/brokers1",
+    "/corporate-agents",
+    "/corporate-agents1",
+    "/imf",
+    "/surveyors",
+    "/surveyors1",
+    "/tpa",
+    "/web-aggregators",
+    "/insurance-repository",
+    "/insurance-self-network-platform-isnp-",
+    "/insurance-web-aggregators",
+    "/reinsurers",
+    "/reinsurance-branches",
+    # ── Lists ──
+    "/list-of-brokers",
+    "/list-of-corporate-agents",
+    "/list-of-corporate-agents1",
+    "/list-of-corporate-agents2",
+    "/list-of-general-insurers",
+    "/list-of-health-insurers",
+    "/list-of-life-insurers1",
+    "/list-of-life-products",
+    "/list-of-reinsurers",
+    "/list-of-reinsurer-branches",
+    "/list-of-surveyors",
+    "/list-of-imfs",
+    "/list-of-tpas",
+    "/list-of-web-aggregators",
+    "/list-of-insurance-repository",
+    "/list-of-telemarketer1",
+    "/list-of-telemarketer2",
+    "/list-of-appointed-actuaries",
+    "/list-of-appointed-actuaries-life",
+    "/list-of-appointed-actuaries-non-life",
+    "/list-of-appointed-actuaries-health",
+    "/list-of-appointed-actuaries-reinsurance",
+    "/list-of-gros",
+    "/list-of-members1",
+    "/frbs",
+    # ── Departments - About ──
+    "/about-accounts",
+    "/about-actuarial",
+    "/about-administration",
+    "/about-agency-distribution",
+    "/about-brokers",
+    "/about-communication",
+    "/about-consumer-affairs",
+    "/about-corporate-services",
+    "/about-enforcement",
+    "/about-finance-and-accounts",
+    "/about-health",
+    "/about-hr",
+    "/about-information-technology",
+    "/about-inspection",
+    "/about-insurance-marketing-firm",
+    "/about-investment",
+    "/about-legal",
+    "/about-life",
+    "/about-microinsurance",
+    "/about-non-life",
+    "/about-re-insurance",
+    "/about-sectoral-development",
+    "/about-surveyors",
+    "/about-vigilance",
+    # ── Other ──
+    "/antimoney-laundering",
+    "/archive",
+    "/claims",
+    "/conferences",
+    "/seminars",
+    "/events1",
+    "/general",
+    "/international-affairs",
+    "/legal",
+    "/life",
+    "/non-life",
+    "/rti",
+    "/rti-act",
+    "/response-corner",
+    "/research-corner",
+    "/vigilance",
+    "/vigilance1",
+    "/lapsed-cor-of-corporate-agents",
+    "/panel-of-actuaries",
+    "/sairm",
+    "/insurers",
+    "/intermediaries",
+    "/policyholders",
+    # ── /web/guest/ variants ──
     "/web/guest/acts",
     "/web/guest/annual-reports",
     "/web/guest/forms",
     "/web/guest/reports-and-manuals",
     "/web/guest/orders",
+    "/web/guest/press-releases",
+    "/web/guest/whats-new",
+    "/web/guest/standard-products",
+    "/web/guest/industry-trends",
+    "/web/guest/faqs1",
+    "/web/guest/health-dept",
 ]
 
 HEADERS = {
@@ -254,7 +418,7 @@ def download_document(url: str, ext: str, category: str) -> bool:
     return True
 
 
-def crawl_category(category: str, path: str, max_pages: int = 5) -> dict:
+def crawl_category(category: str, path: str, max_pages: int = 20) -> dict:
     """Crawl a single IRDAI category. Returns counts by doc type."""
     url = BASE_URL + path
     counts = {"pdf": 0, "excel": 0, "word": 0}
@@ -271,9 +435,8 @@ def crawl_category(category: str, path: str, max_pages: int = 5) -> dict:
 
         for doc_url, ext in doc_links:
             if download_document(doc_url, ext, category):
-                dtype = "pdf" if ext == ".pdf" else ("excel" if ext in (".xlsx",".xls",".csv") else "word")
-                counts[dtype] += 1
-            time.sleep(0.5)
+                counts[_classify(ext)] += 1
+            time.sleep(0.3)
 
         # 2. Follow document-detail pages
         detail_links = extract_document_detail_links(resp.text, url)
@@ -286,12 +449,11 @@ def crawl_category(category: str, path: str, max_pages: int = 5) -> dict:
                     inner_docs = extract_doc_links(detail_resp.text, detail_url)
                     for doc_url, ext in inner_docs:
                         if download_document(doc_url, ext, category):
-                            dtype = "pdf" if ext == ".pdf" else ("excel" if ext in (".xlsx",".xls",".csv") else "word")
-                            counts[dtype] += 1
-                        time.sleep(0.5)
+                            counts[_classify(ext)] += 1
+                        time.sleep(0.3)
             except Exception as exc:
                 logger.warning("Error following detail page %s: %s", detail_url[:80], exc)
-            time.sleep(0.5)
+            time.sleep(0.3)
 
         next_url = get_next_page_url(resp.text, url)
         if not next_url or next_url == url:
@@ -303,13 +465,44 @@ def crawl_category(category: str, path: str, max_pages: int = 5) -> dict:
     return counts
 
 
+def _classify(ext: str) -> str:
+    """Return doc type label for an extension."""
+    if ext == ".pdf":
+        return "pdf"
+    if ext in (".xlsx", ".xls", ".csv"):
+        return "excel"
+    return "word"
+
+
+def _discover_all_internal_links(html: str, base_url: str) -> list[str]:
+    """Find all internal /path links on a page for deep crawling."""
+    soup = BeautifulSoup(html, "html.parser")
+    links = set()
+    for a in soup.find_all("a", href=True):
+        href = a["href"].strip()
+        if href.startswith("javascript") or href.startswith("#") or href.startswith("mailto"):
+            continue
+        if href.startswith("/") or "irdai.gov.in" in href:
+            full = urljoin(base_url, href)
+            links.add(full)
+    return list(links)
+
+
 def crawl_extra_pages() -> dict:
-    """Crawl additional IRDAI pages (home, forms, reports, etc.)."""
+    """Crawl ALL IRDAI sections (home, forms, reports, departments, lists, etc.)."""
     counts = {"pdf": 0, "excel": 0, "word": 0}
+    visited_pages = set()
+
     for path in EXTRA_PAGES:
         url = BASE_URL + path
-        category = path.split("/")[-1] or "home"
-        logger.info("Crawling extra page: %s", url)
+        if url in visited_pages:
+            continue
+        visited_pages.add(url)
+
+        category = path.strip("/").split("/")[-1] or "home"
+        # Sanitize category name
+        category = category.replace("?", "_").replace("&", "_")[:50]
+        logger.info("Crawling extra page: %s [%s]", url, category)
         resp = fetch_with_retry(url)
         if not resp:
             continue
@@ -319,30 +512,103 @@ def crawl_extra_pages() -> dict:
 
         for doc_url, ext in doc_links:
             if download_document(doc_url, ext, category):
-                dtype = "pdf" if ext == ".pdf" else ("excel" if ext in (".xlsx",".xls",".csv") else "word")
-                counts[dtype] += 1
-            time.sleep(0.5)
+                counts[_classify(ext)] += 1
+            time.sleep(0.3)
 
-        # Follow detail pages
+        # Follow document-detail pages
         detail_links = extract_document_detail_links(resp.text, url)
         for detail_url in detail_links:
+            if detail_url in visited_pages:
+                continue
+            visited_pages.add(detail_url)
             try:
                 detail_resp = fetch_with_retry(detail_url)
                 if detail_resp:
                     inner_docs = extract_doc_links(detail_resp.text, detail_url)
                     for doc_url, ext in inner_docs:
                         if download_document(doc_url, ext, category):
-                            dtype = "pdf" if ext == ".pdf" else ("excel" if ext in (".xlsx",".xls",".csv") else "word")
-                            counts[dtype] += 1
-                        time.sleep(0.5)
+                            counts[_classify(ext)] += 1
+                        time.sleep(0.3)
             except Exception as exc:
-                logger.warning("Error: %s", exc)
-            time.sleep(0.5)
+                logger.warning("Error on detail page %s: %s", detail_url[:80], exc)
+            time.sleep(0.3)
+
+        time.sleep(0.5)
+    return counts
+
+
+def deep_discover_and_crawl() -> dict:
+    """Discover all pages from IRDAI homepage, follow every internal link
+    and download documents found anywhere on the site."""
+    counts = {"pdf": 0, "excel": 0, "word": 0}
+    visited = set()
+    to_visit = [BASE_URL + "/home"]
+
+    # Phase 1: Discover all pages from homepage
+    logger.info("Phase 1: Discovering all internal links from homepage…")
+    resp = fetch_with_retry(BASE_URL + "/home")
+    if resp:
+        found = _discover_all_internal_links(resp.text, BASE_URL + "/home")
+        for link in found:
+            if link not in to_visit:
+                to_visit.append(link)
+    logger.info("Discovered %d internal links to crawl", len(to_visit))
+
+    # Phase 2: Visit each page and download documents
+    for idx, url in enumerate(to_visit):
+        if url in visited:
+            continue
+        # Skip non-irdai.gov.in links
+        if "irdai.gov.in" not in url:
+            continue
+        # Skip external subdomains (bimabharosa, agencyportal, etc.)
+        parsed = urlparse(url)
+        if parsed.hostname and parsed.hostname != "irdai.gov.in" and parsed.hostname != "www.irdai.gov.in":
+            continue
+
+        visited.add(url)
+        path = parsed.path or "/"
+        category = path.strip("/").split("/")[-1] or "misc"
+        category = category.replace("?", "_").replace("&", "_")[:50]
+
+        logger.info("Deep crawl [%d/%d]: %s", idx + 1, len(to_visit), url[:100])
+        resp = fetch_with_retry(url)
+        if not resp:
+            continue
+
+        # Download any docs found directly
+        doc_links = extract_doc_links(resp.text, url)
+        for doc_url, ext in doc_links:
+            if download_document(doc_url, ext, category):
+                counts[_classify(ext)] += 1
+            time.sleep(0.3)
+
+        # Follow document-detail pages
+        detail_links = extract_document_detail_links(resp.text, url)
+        for detail_url in detail_links:
+            if detail_url in visited:
+                continue
+            visited.add(detail_url)
+            try:
+                detail_resp = fetch_with_retry(detail_url)
+                if detail_resp:
+                    inner = extract_doc_links(detail_resp.text, detail_url)
+                    for doc_url, ext in inner:
+                        if download_document(doc_url, ext, category):
+                            counts[_classify(ext)] += 1
+                        time.sleep(0.3)
+            except Exception as exc:
+                logger.warning("Detail error: %s", exc)
+            time.sleep(0.3)
+
+        time.sleep(0.3)
+
+    logger.info("Deep crawl complete. Visited %d pages. Docs: %s", len(visited), counts)
     return counts
 
 
 def run_crawl(categories: list[str] | None = None) -> dict:
-    """Run crawler for all (or selected) categories + extra pages. Returns summary."""
+    """Run crawler for all (or selected) categories + all extra sections + deep discovery. Returns summary."""
     init_db()
     for _d in [PDF_DIR, EXCEL_DIR, WORD_DIR]:
         _d.mkdir(parents=True, exist_ok=True)
@@ -350,6 +616,7 @@ def run_crawl(categories: list[str] | None = None) -> dict:
     cats = categories or list(DOCUMENT_CATEGORIES.keys())
     summary = {"pdf": 0, "excel": 0, "word": 0}
 
+    # Phase 1: Crawl main document categories with pagination
     for cat in cats:
         path = DOCUMENT_CATEGORIES.get(cat)
         if not path:
@@ -360,11 +627,17 @@ def run_crawl(categories: list[str] | None = None) -> dict:
             summary[k] += counts.get(k, 0)
         logger.info("Category '%s' – %s", cat, counts)
 
-    # Crawl extra pages
+    # Phase 2: Crawl all 140+ extra pages (every section)
     extra_counts = crawl_extra_pages()
     for k in summary:
         summary[k] += extra_counts.get(k, 0)
     logger.info("Extra pages – %s", extra_counts)
+
+    # Phase 3: Deep discovery - follow every internal link from homepage
+    deep_counts = deep_discover_and_crawl()
+    for k in summary:
+        summary[k] += deep_counts.get(k, 0)
+    logger.info("Deep discovery – %s", deep_counts)
 
     logger.info("Crawl complete. Summary: %s", summary)
     return summary

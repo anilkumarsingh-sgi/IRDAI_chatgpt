@@ -14,10 +14,14 @@ from huggingface_hub import InferenceClient
 
 from ingestion import retrieve_relevant_chunks, get_chroma_collection, CHROMA_DIR
 from crawler import get_download_stats, DB_PATH, init_db, PDF_DIR, EXCEL_DIR, WORD_DIR
+from scheduler import start_scheduler, get_last_update, trigger_manual_update
 
 # ─── Logging ───────────────────────────────────────────────────────────────────
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("irdai.app")
+
+# ─── Start Background Scheduler (auto-scrape IRDAI for new documents) ──────────
+start_scheduler()
 
 # ─── Page Config ───────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -358,8 +362,55 @@ with st.sidebar:
 
     st.divider()
 
+    # Auto-update status
+    update_info = get_last_update()
+    is_running = update_info.get("is_running", False)
+    last_crawl = update_info.get("last_crawl")
+    last_error = update_info.get("last_error")
+
+    st.markdown("### 🔄 Auto-Update Status")
+    if is_running:
+        st.markdown(
+            '<div class="sb-block"><div class="sb-title">Auto-Update</div>'
+            '<div><span class="pill-ok">⟳ Running…</span> Scraping IRDAI for new documents</div></div>',
+            unsafe_allow_html=True,
+        )
+    elif last_crawl:
+        from datetime import datetime, timezone
+        try:
+            last_dt = datetime.fromisoformat(last_crawl)
+            age = datetime.now(timezone.utc) - last_dt
+            hours_ago = int(age.total_seconds() // 3600)
+            mins_ago = int((age.total_seconds() % 3600) // 60)
+            age_str = f"{hours_ago}h {mins_ago}m ago" if hours_ago else f"{mins_ago}m ago"
+        except Exception:
+            age_str = last_crawl
+        st.markdown(
+            f'<div class="sb-block"><div class="sb-title">Auto-Update</div>'
+            f'<div>Last update: <b style="color:#E2E8F0">{age_str}</b></div>'
+            f'<div style="font-size:.75rem;color:#94A3B8">Next check in ≤ 5 min</div></div>',
+            unsafe_allow_html=True,
+        )
+    else:
+        st.markdown(
+            '<div class="sb-block"><div class="sb-title">Auto-Update</div>'
+            '<div><span class="pill-err">⏳ Pending</span> Initial scrape queued</div></div>',
+            unsafe_allow_html=True,
+        )
+    if last_error:
+        st.error(f"Last error: {last_error}")
+
+    st.divider()
+
     # Admin actions
     st.markdown("### ⚙️ Admin Actions")
+    if st.button("🔄 Force Update Now", disabled=is_running):
+        started = trigger_manual_update()
+        if started:
+            st.success("Manual update started in background. Refresh in a few minutes.")
+        else:
+            st.warning("An update is already running.")
+
     if st.button("🕷️ Run Crawler"):
         from crawler import run_crawl
         with st.spinner("Crawling IRDAI website…"):
@@ -385,6 +436,23 @@ with st.sidebar:
         Vector DB: ChromaDB (local)<br>
         Backend: HuggingFace Inference API
       </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    st.markdown("""
+    <div style="
+      margin-top: 24px;
+      padding: 14px 16px;
+      background: linear-gradient(135deg, rgba(0,198,162,.08), rgba(59,130,246,.08));
+      border: 1px solid rgba(0,198,162,.25);
+      border-radius: 10px;
+      text-align: center;
+    ">
+      <div style="font-family:'Syne',sans-serif;font-size:.7rem;text-transform:uppercase;
+                  letter-spacing:1.2px;color:#00C6A2;margin-bottom:6px;">Prepared By</div>
+      <div style="font-family:'Syne',sans-serif;font-size:.88rem;font-weight:700;
+                  color:#E2E8F0;line-height:1.5;">Shriram General Insurance</div>
+      <div style="font-size:.8rem;color:#94A3B8;margin-top:2px;">Dr. Anil Kumar Singh</div>
     </div>
     """, unsafe_allow_html=True)
 
@@ -490,5 +558,24 @@ st.markdown("""
   ⚠️ <strong>Disclaimer:</strong> This tool is for internal compliance use only by authorised personnel (underwriting, claims, compliance teams).
   It processes only publicly available IRDAI documents and does <strong>not</strong> store or process any policyholder data.
   Responses are AI-generated and should be verified against official IRDAI publications before making compliance decisions.
+</div>
+""", unsafe_allow_html=True)
+
+# ── Prepared By footer
+st.markdown("""
+<div style="
+  margin-top: 32px;
+  padding: 16px 24px;
+  background: linear-gradient(135deg, rgba(0,198,162,.06), rgba(59,130,246,.06));
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  text-align: center;
+">
+  <span style="font-family:'Syne',sans-serif;font-size:.75rem;text-transform:uppercase;
+               letter-spacing:1.2px;color:#00C6A2;">Prepared By</span><br>
+  <span style="font-family:'Syne',sans-serif;font-size:1rem;font-weight:700;
+               color:#E2E8F0;">Shriram General Insurance</span>
+  <span style="color:#94A3B8;">&nbsp;·&nbsp;</span>
+  <span style="font-size:.9rem;color:#94A3B8;">Dr. Anil Kumar Singh</span>
 </div>
 """, unsafe_allow_html=True)

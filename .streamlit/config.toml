@@ -3,3 +3,8 @@ primaryColor = "#00C6A2"
 backgroundColor = "#0B0F1A"
 secondaryBackgroundColor = "#111827"
 textColor = "#E2E8F0"
+
+[server]
+maxUploadSize = 200
+maxMessageSize = 200
+enableXsrfProtection = true
